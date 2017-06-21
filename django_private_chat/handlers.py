@@ -139,6 +139,60 @@ def new_messages_handler(stream):
                     )
                     packet['created'] = msg.get_formatted_create_datetime()
                     packet['sender_name'] = msg.sender.username
+                    if (msg.sender.profil.surname or msg.sender.profil.name):
+                        packet['shown_name'] = msg.sender.profil.surname + " " + msg.sender.profil.name
+                    else:
+                        packet['shown_name'] = msg.sender.username
+
+                    # Send the message
+                    connections = []
+                    # Find socket of the user which sent the message
+                    if (user_owner.username, user_opponent.username) in ws_connections:
+                        connections.append(ws_connections[(user_owner.username, user_opponent.username)])
+                    # Find socket of the opponent
+                    if (user_opponent.username, user_owner.username) in ws_connections:
+                        connections.append(ws_connections[(user_opponent.username, user_owner.username)])
+                    else:
+                        # Find sockets of people who the opponent is talking with
+                        opponent_connections = list(filter(lambda x: x[0] == user_opponent.username, ws_connections))
+                        opponent_connections_sockets = [ws_connections[i] for i in opponent_connections]
+                        connections.extend(opponent_connections_sockets)
+
+                    yield from fanout_message(connections, packet)
+                else:
+                    pass  # no dialog found
+            else:
+                pass  # no user_owner
+        else:
+            pass  # missing one of params
+
+@asyncio.coroutine
+def new_images_handler(stream):
+    """
+    Saves a new chat message to db and distributes msg to connected users
+    """
+    # TODO: handle no user found exception
+    while True:
+        packet = yield from stream.get()
+        session_id = packet.get('session_key')
+        msg = packet.get('message')
+        username_opponent = packet.get('username')
+        if session_id and msg and username_opponent:
+            user_owner = get_user_from_session(session_id)
+            if user_owner:
+                user_opponent = get_user_model().objects.get(username=username_opponent)
+                dialog = get_dialogs_with_user(user_owner, user_opponent)
+                if len(dialog) > 0:
+                    # Save the message
+                    msg = models.Message.objects.filter(pk = msg).first()
+                    msg_to_send = msg.image.url
+                    packet['src'] = msg_to_send
+                    packet['created'] = msg.get_formatted_create_datetime()
+                    packet['sender_name'] = msg.sender.username
+                    if (msg.sender.profil.surname or msg.sender.profil.name):
+                        packet['shown_name'] = msg.sender.profil.surname + " " + msg.sender.profil.name
+                    else:
+                        packet['shown_name'] = msg.sender.username
 
                     # Send the message
                     connections = []
